@@ -8,6 +8,7 @@ import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support.expected_conditions import invisibility_of_element_located
 from selenium.common.exceptions import TimeoutException
 from csv import DictReader, DictWriter
 import re
@@ -58,17 +59,27 @@ driver.implicitly_wait(5)
 print('Logged in')
 try:
     articles = pd.read_csv('final_articles.csv').sample(frac=1, random_state=4242)
+    article_num = -1
     for row in articles.itertuples():
+        # to help with skipping later
+        article_num += 1
+        print('Fetching article', article_num)
+        if article_num < 16:
+            continue
+        url_stub = row.href[len('https://www.uptodate.com/contents/'):]
+        if url_stub.startswith('society-guideline-links') or url_stub.startswith('table-of-contents'):
+            print('Skipping', row.href)
+            continue
         driver.get(row.href)
             
         topic_text = WebDriverWait(driver, timeout=5).until(lambda d: d.find_element(By.ID, value="topicText"))
-        driver.implicitly_wait(3)
+        WebDriverWait(driver, timeout=5).until(invisibility_of_element_located((By.CSS_SELECTOR, 'a[href="/store"]')))
         # driver.execute_script('document.querySelector("#topicText").innerHTML = '
         #                       'document.querySelector("#topicText").innerHTML.replaceAll('
         #                       '/<p class="headingAnchor" id="xhash_H.+?<\/p>/g, "<br />");')
         topic_html = topic_text.get_attribute('innerText')
         paras = re.split(r'\n+', topic_html)
-        print(f"Found {len(paras)} sectons within {row.title}")
+        print(f"Found {len(paras)} paragraphs within {row.title}")
     
         para_count = 0
         curr_header = None
@@ -76,10 +87,12 @@ try:
         texts = []
         curr_text = 'passage: '
         for para in paras:
-            # if curr_header is None, then this is just INTRODUCTION and nothing's been said yet
-            if para.isupper() and curr_header is not None:
-                titles.append(curr_header)
-                texts.append(curr_text)
+            if para.isupper():
+                # if curr_header is None, then this is just INTRODUCTION and nothing's been said yet
+                if curr_header is not None:
+                    titles.append(curr_header)
+                    texts.append(curr_text)
+                # but we still need to reset and prepare the next section
                 curr_header = row.href[len('https://www.uptodate.com/contents/'):] + '/#' + para
                 curr_header = curr_header
                 curr_text = 'passage: '
@@ -94,8 +107,6 @@ try:
         # Tokenize the input texts
         if model is None:
             model_thread.join()
-        else:
-            print(tokenizer)
         batch_dict = tokenizer(texts, max_length=512, padding=True, truncation=True, return_tensors='pt')
         print("Tokenized batch_dict")
 
@@ -107,7 +118,6 @@ try:
             embeddings = average_pool(outputs.last_hidden_state,attn_mask)
             index.upsert(list(zip(titles, embeddings.tolist())))
             print('Updated index')
-        break
 except Exception as e:
     print(e)
 finally:
