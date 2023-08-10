@@ -1,7 +1,8 @@
-import torch.nn.functional as F
-import torch
-from torch import Tensor
-from transformers import AutoTokenizer, AutoModel
+# import torch.nn.functional as F
+# import torch
+# from torch import Tensor
+# from transformers import AutoTokenizer, AutoModel
+from deepsparse import Pipeline
 import numpy as np
 import pandas as pd
 
@@ -19,23 +20,28 @@ import pinecone
 
 dotenv.load_dotenv()
 
-def average_pool(last_hidden_states: Tensor,
-                 attention_mask: Tensor) -> Tensor:
+def average_pool(last_hidden_states,
+                 attention_mask):
     last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
     return last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
 
 tokenizer = None
 model = None
+pipeline = None
 def load_model():
     global tokenizer
     global model
-    model_name = 'intfloat/e5-large-v2'
-    print('Loading tokenizer...')
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    print(('Done loading tokenizer'))
-    print('Loading model...')
-    model = AutoModel.from_pretrained(model_name)
-    print('Done loading model')
+    global pipeline
+    # model_name = 'intfloat/e5-large-v2'
+    # print('Loading tokenizer...')
+    # tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # print(('Done loading tokenizer'))
+    # print('Loading model...')
+    # model = AutoModel.from_pretrained(model_name)
+    # print('Done loading model')
+    pipeline = Pipeline.create(
+            task="transformers_embedding_extraction",
+            model_path="zoo:nlp/masked_language_modeling/biobert-base_cased/pytorch/huggingface/pubmed/pruned90-none")
 model_thread = threading.Thread(target=load_model)
 model_thread.start()
 
@@ -43,8 +49,16 @@ pinecone.init(api_key=os.getenv('PINEKEY'), environment="us-west4-gcp-free")
 index = pinecone.Index("utd-llm-para")
 
 options = webdriver.ChromeOptions()
-options.add_experimental_option("detach", True)
-driver = webdriver.Chrome()
+# options.add_experimental_option("detach", True)
+options.add_argument('--headless')
+options.add_argument("window-size=1400,1500")
+options.add_argument("--disable-gpu")
+options.add_argument("--no-sandbox")
+options.add_argument("start-maximized")
+options.add_argument("enable-automation")
+options.add_argument("--disable-infobars")
+options.add_argument("--disable-dev-shm-usage")
+driver = webdriver.Chrome(options)
 
 # shoot, i'm gonna have to log in if i actually want to read the articles
 driver.get('https://uptodate.com/login')
@@ -105,19 +119,22 @@ try:
             print(title)
 
         # Tokenize the input texts
-        if model is None:
+        print('About to attempt pipeline')
+        if pipeline is None:
             model_thread.join()
+        output = np.array(pipeline(texts).embeddings)
+        import pdb; pdb.set_trace()
         batch_dict = tokenizer(texts, max_length=512, padding=True, truncation=True, return_tensors='pt')
         print("Tokenized batch_dict")
 
-        with torch.no_grad():
-            attn_mask = batch_dict['attention_mask']
-            outputs = model(input_ids=batch_dict['input_ids'],
-                            token_type_ids=batch_dict['token_type_ids'],
-                            attention_mask=attn_mask)
-            embeddings = average_pool(outputs.last_hidden_state,attn_mask)
-            index.upsert(list(zip(titles, embeddings.tolist())))
-            print('Updated index')
+        # with torch.no_grad():
+        attn_mask = batch_dict['attention_mask']
+        outputs = model(input_ids=batch_dict['input_ids'],
+                        token_type_ids=batch_dict['token_type_ids'],
+                        attention_mask=attn_mask)
+        embeddings = average_pool(outputs.last_hidden_state,attn_mask)
+        index.upsert(list(zip(titles, embeddings.tolist())))
+        print('Updated index')
 except Exception as e:
     print(e)
 finally:
