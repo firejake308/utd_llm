@@ -10,7 +10,11 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.expected_conditions import invisibility_of_element_located
+<<<<<<< HEAD
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+=======
+from selenium.common.exceptions import TimeoutException
+>>>>>>> d089900a4d001f6c001b81c5a218445ef814ddf8
 from csv import DictReader, DictWriter
 import re
 import dotenv
