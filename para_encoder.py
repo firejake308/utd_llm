@@ -10,7 +10,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support.expected_conditions import invisibility_of_element_located
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 from csv import DictReader, DictWriter
 import re
 import dotenv
@@ -69,7 +69,7 @@ def init_driver():
     print('Logged in')
     return driver
 driver = init_driver()
-
+skipped_articles = []
 try:
     articles = pd.read_csv('final_articles.csv').drop_duplicates('href').sample(frac=1, random_state=4242)
     article_num = -1
@@ -77,7 +77,7 @@ try:
         # to help with skipping later
         article_num += 1
         print('Fetching article', article_num)
-        if article_num < 332:
+        if article_num not in [1658, 2331, 4992]:
             continue
         url_stub = row.href[len('https://www.uptodate.com/contents/'):]
         if url_stub.startswith('society-guideline-links') or url_stub.startswith('table-of-contents'):
@@ -89,7 +89,7 @@ try:
             topic_text = WebDriverWait(driver, timeout=10).until(lambda d: d.find_element(By.ID, value="topicText"))
             WebDriverWait(driver, timeout=5).until(invisibility_of_element_located((By.CSS_SELECTOR, 'a[href="/store"]')))
         except TimeoutException:
-            print(f"Timed out on {article_num}")
+            print(f"Timed out on #{article_num}: {url_stub}")
             # probably some sort of rate-limiting, so eventually, we'll probably sleep it off
             # but for now, we'll try printing the HTML once
             # print(driver.find_element(By.TAG_NAME, "body").get_attribute("innerText"))
@@ -97,9 +97,18 @@ try:
             driver.quit()
             driver = init_driver()
             driver.get(row.href)
-            topic_text = WebDriverWait(driver, timeout=10).until(lambda d: d.find_element(By.ID, value="topicText"))
-            WebDriverWait(driver, timeout=5).until(invisibility_of_element_located((By.CSS_SELECTOR, 'a[href="/store"]')))
-        topic_html = topic_text.get_attribute('innerText')
+            try:
+                topic_text = WebDriverWait(driver, timeout=10).until(lambda d: d.find_element(By.ID, value="topicText"))
+                WebDriverWait(driver, timeout=5).until(invisibility_of_element_located((By.CSS_SELECTOR, 'a[href="/store"]')))
+            except:
+                print('Double-timeout on {article_num}, skipping')
+                skipped_articles.append(article_num)
+                continue
+        try:
+            topic_html = topic_text.get_attribute('innerText')
+        except StaleElementReferenceException:
+            topic_text = WebDriverWait(driver, timeout=5).until(lambda d: d.find_element(By.ID, value="topicText"))
+            topic_html = topic_text.get_attribute('innerText')
         paras = re.split(r'\n+', topic_html)
         print(f"Found {len(paras)} paragraphs within {row.title}")
     
@@ -119,6 +128,8 @@ try:
                 curr_text = 'passage: '
             elif len(para) > 3:
                 curr_text += para + '\n'
+        if curr_header is None:
+            curr_header = 'EVERYTHING'
         titles.append(curr_header)
         texts.append(curr_text)
         print(f"Found {len(texts)} sections")
@@ -143,4 +154,5 @@ except Exception as e:
     logging.exception(e)
 finally:
     driver.quit()
+    print(skipped_articles)
     print('Done')
