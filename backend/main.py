@@ -5,7 +5,7 @@ from llama_cpp import Llama
 model_name_or_path = "TheBloke/Llama-2-7B-chat-GGML"
 model_basename = "llama-2-7b-chat.ggmlv3.q2_K.bin"
 model_path = hf_hub_download(repo_id=model_name_or_path, filename=model_basename)
-llm = Llama(model_path=model_path, n_threads=12, n_batch=512, n_ctx=2048)
+llm = Llama(model_path=model_path, n_threads=8, n_batch=512, n_ctx=2048)
 
 app = FastAPI()
 
@@ -15,7 +15,8 @@ async def root():
 
 @app.get("/completion")
 async def completion():
-    prompt="""[INST] <<SYS>>You are a helpful and honest research assistant. Use the context below to answer any questions you are asked. At the end of the answer, list relevant quotes from the context. If the answer is not found in the context, then answer to the best of your ability, but do not share any references. Format your answers as follows:
+    prompt="""[INST] <<SYS>>
+You are a helpful and honest research assistant. Use the context below to answer any questions you are asked. At the end of the answer, list relevant quotes from the context. If the answer is not found in the context, then answer to the best of your ability, but do not share any references. Format your answers as follows:
 
 This is an example answer, with an explanation that ties everything together.
 RELEVANT QUOTES:
@@ -28,8 +29,9 @@ Whales And Dolphins:
 "Whales and dolphins are mammals that live in the sea. Most mammals do not live in the sea, but whales and dolphins are exceptions. This is because they are good swimmers."
 ----
 <</SYS>>
-Where do dolphins live? 
-[/INST]"""
+
+
+Where do dolphins live? [/INST]"""
     response = llm(
         prompt=prompt,
         max_tokens=2048,
